@@ -5,15 +5,20 @@ use ink_lang as ink;
 #[ink::contract]
 mod a1Token {
     use ink_storage::{traits::SpreadAllocate, Mapping};
+    use ink_prelude::string::String;
+    use ink_prelude::string::ToString;
 
     #[ink(storage)]
     #[derive(SpreadAllocate)]
     pub struct A1Token {
-        total_supply: u32,
-        balances: Mapping<AccountId, u32>,
+        _total_supply: u32,
+        _balances: Mapping<AccountId, u32>,
         // (Spender => Recipient) => amount 
-        allowances: Mapping<(AccountId, AccountId), u32>,
-        mint_authority: AccountId,
+        _allowances: Mapping<(AccountId, AccountId), u32>,
+        _mint_authority: AccountId,
+        _name: String,
+        _symbol: String,
+        _decimals: u8,
     }
 
     #[ink(event)]
@@ -51,12 +56,15 @@ mod a1Token {
     impl A1Token {
         /// Creates a token contract with the given initial supply belonging to the contract creator.
         #[ink(constructor)]
-        pub fn new_token(initial_supply: u32) -> Self {
+        pub fn new_token(initial_supply: u32, name: String, symbol: String, decimals: u8) -> Self {
             initialize_contract(|contract: &mut Self| {
                 let caller = Self::env().caller();
-                contract.balances.insert(&caller, &initial_supply);
-                contract.total_supply = initial_supply;
-                contract.mint_authority = caller;
+                contract._balances.insert(&caller, &initial_supply);
+                contract._total_supply = initial_supply;
+                contract._mint_authority = caller;
+                contract._name = name;
+                contract._symbol = symbol;
+                contract._decimals = decimals;
                 Self::env().emit_event(Transfer {
                     sender: None,
                     recipient: Some(caller),
@@ -67,14 +75,32 @@ mod a1Token {
 
         /// Returns the total token supply.
         #[ink(message)]
-        pub fn total_supply(&self) -> u32 {
-            self.total_supply
+        pub fn _total_supply(&self) -> u32 {
+            self._total_supply
+        }
+
+        /// Returns the token decimal.
+        #[ink(message)]
+        pub fn _decimals(&self) -> u8 {
+            self._decimals
+        }
+
+        /// Returns the token name.
+        #[ink(message)]
+        pub fn _name(&self) -> String {
+            self._name.to_string()
+        }
+
+        /// Returns the token symbol.
+        #[ink(message)]
+        pub fn _symbol(&self) -> String {
+            self._symbol.to_string()
         }
 
         /// Checks the current balance of the chosen account.
         #[ink(message)]
         pub fn balance_of(&self, account: AccountId) -> u32 {
-            match self.balances.get(&account) {
+            match self._balances.get(&account) {
                 Some(value) => value,
                 None => 0,
             }
@@ -83,7 +109,7 @@ mod a1Token {
         /// Checks the current mint authority.
         #[ink(message)]
         pub fn get_current_authority(&self) -> AccountId {
-            self.mint_authority
+            self._mint_authority
         }
 
         /// Transfers an amount of tokens to the chosen recipient.
@@ -100,9 +126,9 @@ mod a1Token {
             if sender_balance < amount {
                 return Err(Error::InsufficientBalance);
             }
-            self.balances.insert(sender, &(sender_balance - amount));
+            self._balances.insert(sender, &(sender_balance - amount));
             let recipient_balance = self.balance_of(recipient);
-            self.balances.insert(recipient, &(recipient_balance + amount));
+            self._balances.insert(recipient, &(recipient_balance + amount));
             self.env().emit_event(Transfer {
                 sender: Some(sender),
                 recipient: Some(recipient),
@@ -111,10 +137,11 @@ mod a1Token {
             Ok(())
         }
 
+        /// Approves allowance
         #[ink(message)]
         pub fn approve(&mut self, spender: AccountId, amount: u32) -> Result<()>{
             let owner = self.env().caller();
-            self.allowances.insert((owner, spender), &amount);
+            self._allowances.insert((owner, spender), &amount);
             self.env().emit_event(Approval {
                 owner,
                 spender,
@@ -123,14 +150,16 @@ mod a1Token {
             Ok(())
         }
 
+        /// allowance
         #[ink(message)]
         pub fn allowance(&self, owner: AccountId, spender: AccountId) -> u32 {
-            match self.allowances.get((&owner, &spender)){
+            match self._allowances.get((&owner, &spender)){
                 Some(value) => value,
                 None => 0,
             }
         }
 
+        /// transfer from 
         #[ink(message)]
         pub fn transfer_from(&mut self, sender: AccountId, recipient: AccountId, amount: u32) -> Result<()> {
             let caller = self.env().caller();
@@ -139,7 +168,7 @@ mod a1Token {
                 return Err(Error::InsufficientAllowance)
             }
             self.transfer_from_to(sender, recipient, amount)?;
-            self.allowances.insert((sender, caller), &(allowance - amount));
+            self._allowances.insert((sender, caller), &(allowance - amount));
             Ok(())
         }
         
@@ -147,12 +176,12 @@ mod a1Token {
         #[ink(message)]
         pub fn mint(&mut self, amount: u32) -> Result<()> {
             let sender = self.env().caller();
-            if sender != self.mint_authority {
+            if sender != self._mint_authority {
                 return Err(Error::Unauthorized);
             }
             let sender_balance = self.balance_of(sender);
-            self.balances.insert(sender, &(sender_balance + amount));
-            self.total_supply += amount;
+            self._balances.insert(sender, &(sender_balance + amount));
+            self._total_supply += amount;
             Ok(())
         }
 
@@ -164,8 +193,8 @@ mod a1Token {
             if sender_balance < amount {
                 return Err(Error::InsufficientBalance);
             }
-            self.balances.insert(sender, &(sender_balance - amount));
-            self.total_supply -= amount;
+            self._balances.insert(sender, &(sender_balance - amount));
+            self._total_supply -= amount;
             Ok(())
         }
 
@@ -173,10 +202,10 @@ mod a1Token {
         #[ink(message)]
         pub fn transfer_authority(&mut self, new_owner: AccountId) -> Result<()> {
             let sender = self.env().caller();
-            if sender != self.mint_authority {
+            if sender != self._mint_authority {
                 return Err(Error::Unauthorized);
             }
-            self.mint_authority = new_owner;
+            self._mint_authority = new_owner;
             Ok(())
         }   
     }
@@ -195,13 +224,13 @@ mod a1Token {
         /// We test if the default constructor does its job.
         #[ink::test]
         fn should_initialize_with_correct_supply() {
-            let A1Token = A1Token::new_token(1000);
-            assert_eq!(A1Token.total_supply, 1000);
+            let A1Token = A1Token::new_token(1000, "A1Token".to_string(), "A1".to_string(), 18);
+            assert_eq!(A1Token._total_supply, 1000);
         }
 
         #[ink::test]
         fn should_allow_transfers() {
-            let mut A1Token = A1Token::new_token(1000);
+            let mut A1Token = A1Token::new_token(1000, "A1Token".to_string(), "A1".to_string(), 18);
             let alice = AccountId::from([0x1; 32]);
             let bob = AccountId::from([0x2; 32]);
 
@@ -225,10 +254,10 @@ mod a1Token {
         #[ink::test]
         fn should_mint_more_supply() {
             let amount_to_mint : u32 = 1000;
-            let mut A1Token = A1Token::new_token(amount_to_mint);
-            assert_eq!(A1Token.total_supply, amount_to_mint);
+            let mut A1Token = A1Token::new_token(amount_to_mint, "A1Token".to_string(), "A1".to_string(), 18);
+            assert_eq!(A1Token._total_supply, amount_to_mint);
             assert_eq!(A1Token.mint(amount_to_mint), Ok(()));
-            assert_eq!(A1Token.total_supply, amount_to_mint + amount_to_mint);
+            assert_eq!(A1Token._total_supply, amount_to_mint + amount_to_mint);
 
             let bob = AccountId::from([0x2; 32]);
             ink_env::test::set_caller::<ink_env::DefaultEnvironment>(bob);
@@ -238,14 +267,14 @@ mod a1Token {
         #[ink::test]
         fn should_burn_token(){
             let initial_supply : u32 = 1000;
-            let mut A1Token = A1Token::new_token(initial_supply);
+            let mut A1Token = A1Token::new_token(initial_supply, "A1Token".to_string(), "A1".to_string(), 18);
 
             let amount_to_burn : u32 = 250;
             assert_eq!(A1Token.burn(amount_to_burn), Ok(()));
-            assert_eq!(A1Token.total_supply, initial_supply - amount_to_burn);
+            assert_eq!(A1Token._total_supply, initial_supply - amount_to_burn);
 
             assert_eq!(A1Token.burn(initial_supply), Err(Error::InsufficientBalance));
-            assert_eq!(A1Token.total_supply, initial_supply - amount_to_burn);
+            assert_eq!(A1Token._total_supply, initial_supply - amount_to_burn);
         }
 
         #[ink::test]
@@ -257,25 +286,25 @@ mod a1Token {
             ink_env::test::set_caller::<ink_env::DefaultEnvironment>(alice);
 
             let initial_supply : u32 = 1000;
-            let mut A1Token = A1Token::new_token(initial_supply);
+            let mut A1Token = A1Token::new_token(initial_supply, "A1Token".to_string(), "A1".to_string(), 18);
 
-            assert_eq!(A1Token.mint_authority, alice);
+            assert_eq!(A1Token._mint_authority, alice);
             assert_eq!(A1Token.transfer_authority(bob), Ok(()));
-            assert_eq!(A1Token.mint_authority, bob);
+            assert_eq!(A1Token._mint_authority, bob);
 
             ink_env::test::set_caller::<ink_env::DefaultEnvironment>(jake);
             assert_eq!(A1Token.transfer_authority(alice), Err(Error::Unauthorized));
-            assert_eq!(A1Token.mint_authority, bob);
+            assert_eq!(A1Token._mint_authority, bob);
         }
 
         #[ink::test]
-        fn should_approve_allowances(){
+        fn should_approve__allowances(){
             let alice = AccountId::from([0x1; 32]);
             let bob = AccountId::from([0x2; 32]);
             ink_env::test::set_caller::<ink_env::DefaultEnvironment>(alice);
 
             let initial_supply : u32 = 1000;
-            let mut A1Token = A1Token::new_token(initial_supply);
+            let mut A1Token = A1Token::new_token(initial_supply, "A1Token".to_string(), "A1".to_string(), 18);
 
             let amount_to_approve : u32 = 250;
             assert_eq!(A1Token.approve(bob, amount_to_approve), Ok(())); 
@@ -290,7 +319,7 @@ mod a1Token {
             ink_env::test::set_caller::<ink_env::DefaultEnvironment>(alice);
 
             let initial_supply : u32 = 1000;
-            let mut A1Token = A1Token::new_token(initial_supply);
+            let mut A1Token = A1Token::new_token(initial_supply, "A1Token".to_string(), "A1".to_string(), 18);
             assert_eq!(A1Token.balance_of(alice), initial_supply);
 
             let amount_to_transfer : u32 = 100;
